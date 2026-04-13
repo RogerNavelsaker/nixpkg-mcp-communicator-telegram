@@ -1,5 +1,5 @@
 {
-  description = "Nix packaging scaffold for @agentclientprotocol/claude-agent-acp";
+  description = "Nix packaging scaffold for mcp-communicator-telegram";
 
   nixConfig = {
     extra-substituters = [
