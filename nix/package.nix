@@ -1,4 +1,4 @@
-{ bash, bun, bun2nix, lib, makeWrapper, symlinkJoin }:
+{ bash, bun, bun2nix, lib, stdenv, symlinkJoin }:
 
 let
   manifest = builtins.fromJSON (builtins.readFile ./package-manifest.json);
@@ -14,6 +14,15 @@ let
     if builtins.hasAttr manifest.meta.licenseSpdx licenseMap
     then licenseMap.${manifest.meta.licenseSpdx}
     else lib.licenses.unfree;
+  bunCompileTargetMap = {
+    x86_64-linux = "bun-linux-x64";
+    aarch64-linux = "bun-linux-arm64";
+    x86_64-darwin = "bun-darwin-x64";
+    aarch64-darwin = "bun-darwin-arm64";
+  };
+  bunCompileTarget =
+    bunCompileTargetMap.${stdenv.hostPlatform.system}
+      or (throw "Unsupported Bun compile target for ${stdenv.hostPlatform.system}");
   aliasSpecs = map (
     alias:
     if builtins.isString alias then
@@ -25,18 +34,6 @@ let
       alias
   ) (manifest.binary.aliases or [ ]);
   renderAliasArgs = args: lib.concatMapStringsSep " " lib.escapeShellArg args;
-  aliasWrappers = lib.concatMapStrings
-    (
-      alias:
-      ''
-        cat > "$out/bin/${alias.name}" <<EOF
-#!${lib.getExe bash}
-exec "$out/bin/${manifest.binary.name}" ${renderAliasArgs alias.args} "\$@"
-EOF
-        chmod +x "$out/bin/${alias.name}"
-      ''
-    )
-    aliasSpecs;
   aliasOutputLinks = lib.concatMapStrings
     (
       alias:
@@ -79,18 +76,16 @@ symlinkJoin {
   name = "${manifest.binary.name}-${packageVersion}";
   outputs = [ "out" ] ++ map (alias: alias.name) aliasSpecs;
   paths = [ basePackage ];
-  nativeBuildInputs = [
-    makeWrapper
-  ];
+  nativeBuildInputs = [ bun ];
   postBuild = ''
     rm -rf "$out/bin"
     mkdir -p "$out/bin"
     entrypoint="$(find "${basePackage}/share/${manifest.package.repo}/node_modules" -path "*/node_modules/${manifest.package.npmName}/${manifest.binary.entrypoint}" | head -n 1)"
-    cat > "$out/bin/${manifest.binary.name}" <<EOF
-#!${lib.getExe bash}
-exec ${lib.getExe' bun "bun"} "$entrypoint" "\$@"
-EOF
-    chmod +x "$out/bin/${manifest.binary.name}"
+    ${lib.getExe' bun "bun"} build \
+      --compile \
+      --target ${lib.escapeShellArg bunCompileTarget} \
+      --outfile "$out/bin/${manifest.binary.name}" \
+      "$entrypoint"
     ${aliasOutputLinks}
   '';
   meta = basePackage.meta;
